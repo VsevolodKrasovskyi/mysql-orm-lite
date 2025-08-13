@@ -1,6 +1,5 @@
-import email
 from mysql_orm.base import BaseModel, DB
-from mysql_orm.fields import String, Integer, Text, ForeignKey
+from mysql_orm.fields import String, Integer, ForeignKey, DateTime
 from mysql_orm import migrate
 import asyncio
 
@@ -17,6 +16,8 @@ class MetaUser(BaseModel):
     user_id = ForeignKey(User)
     description = String()
     image = String()
+    date =DateTime(default="CURRENT_TIMESTAMP")
+
 migrate.collect_models()
 
 DB.connect(
@@ -27,10 +28,14 @@ DB.connect(
         autocommit=True
     )
 
+
 async def main():
-    migrate.run
-    users = User.get_or_create(name="Test",email="example@example.com")
-    MetaUser.get_or_create(user_id="1",description="Test")
-    print(users)
+    await migrate.run()
+    all_users = await User.all()
+    for u in all_users:
+        meta = await MetaUser.get(user_id=u.id)
+       # print(f"{u.name} - {meta.description}")
+
+    print(all_users)
 
 asyncio.run(main())
