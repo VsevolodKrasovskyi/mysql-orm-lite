@@ -30,12 +30,6 @@ DB.connect(
 
 
 async def main():
-    await migrate.run()
-    all_users = await User.all()
-    for u in all_users:
-        meta = await MetaUser.get(user_id=u.id)
-       # print(f"{u.name} - {meta.description}")
-
-    print(all_users)
-
+    user = await User.get(id=1)
+    print(user)
 asyncio.run(main())
