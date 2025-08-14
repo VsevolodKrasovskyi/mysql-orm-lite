@@ -52,7 +52,16 @@ class Field:
             parts.append("NOT NULL")
 
         if self.default is not None:
-            parts.append(f"DEFAULT '{self.default}'")
+            upper_type = self.sql_type.upper()
+            if (
+                isinstance(self.default, str)
+                and self.default.upper() in ("CURRENT_TIMESTAMP", "NOW()")
+                and upper_type in ("DATETIME", "TIMESTAMP")
+            ):
+                parts.append(f"DEFAULT {self.default}")
+            else:
+                parts.append(f"DEFAULT '{self.default}'")
+
 
         return " ".join(parts)
 

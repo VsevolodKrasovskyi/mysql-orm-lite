@@ -1,7 +1,7 @@
 import inspect
 import importlib
 
-from mysql_orm.base import BaseModel, DB
+from ormysql.base import BaseModel, DB
 
 # ----------------------
 # Models container
@@ -15,7 +15,7 @@ def _register(*models):
 
     Usage:
         from app.models import User, MetaUser
-        from mysql_orm.migrate import register, run
+        from ormysql.migrate import register, run
 
         register(User, MetaUser)
         await run()
@@ -37,7 +37,7 @@ def collect_models():
         class MetaUser(BaseModel): ...
 
         # still in app/models.py
-        from mysql_orm.migrate import collect_models, run
+        from ormysql.migrate import collect_models, run
         collect_models()
         await run()
     """
@@ -121,8 +121,8 @@ async def run():
           `generate_create_table()` produces valid DDL.
 
     Usage:
-        from mysql_orm.base import DB
-        from mysql_orm.migrate import register, run
+        from ormysql.base import DB
+        from ormysql.migrate import register, run
         from app.models import User, MetaUser
 
         DB.connect(host="127.0.0.1", port=3306, user="root", password="pwd", db="mydb")
