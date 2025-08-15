@@ -1,7 +1,8 @@
 import inspect
 import importlib
 
-from ormysql.base import BaseModel, DB
+from ormysql.base import BaseModel
+from .db import DB
 
 # ----------------------
 # Models container
@@ -133,16 +134,22 @@ async def run():
         print("[warn] No models found. Call `register()` or `collect_models()` first.")
         return
 
-    # Call generate_create_table to fill __dependencies__ (FK graph)
     for model in MODELS:
         model.generate_create_table()
 
     sorted_models = sort_models_by_dependencies(MODELS)
 
-    for model in sorted_models:
-        ddl = model.generate_create_table()
-        print(f"[apply] {model.__table__}")
-        conn = await DB.conn()
+    conn = await DB.conn()
+    try:
         async with conn.cursor() as cur:
-            await cur.execute(ddl)
-        await conn.ensure_closed()
+            await cur.execute("START TRANSACTION")
+            for model in sorted_models:
+                ddl = model.generate_create_table()
+                print(f"[apply] {model.__table__}")
+                await cur.execute(ddl)
+            await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
+    finally:
+        await DB.release(conn)

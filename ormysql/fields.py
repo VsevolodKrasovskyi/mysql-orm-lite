@@ -83,18 +83,19 @@ class ForeignKey(Field):
         - DDL will be generated, and the BaseModel.generate_create_table method
           will add the FOREIGN KEY constraint automatically.
     """
-    def __init__(self, *args, to=None, to_field="id", **kwargs):
+    def __init__(self, *args, to=None, to_field="id", on_delete=None, on_update=None, **kwargs):
         if args:
             to = args[0]
             if len(args) > 1:
                 to_field = args[1]
-
         if to is None:
             raise ValueError("ForeignKey: 'to' model must be specified.")
 
         super().__init__("INT", **kwargs)
         self.to_model = to
         self.to_field = to_field
+        self.on_delete = on_delete
+        self.on_update = on_update
 
     def ddl(self, name):
         """
