@@ -1,14 +1,17 @@
 from setuptools import setup, find_packages
+import os
+
+def read_file(filename):
+    if os.path.exists(filename):
+        with open(filename, encoding="utf-8") as f:
+            return f.read()
+    return ""
 
 setup(
     name='ormysql',
     version='0.1.2',
     description='MySQL ORM',
-     long_description=(
-        open("README.md", encoding="utf-8").read()
-        + "\n\n"
-        + open("CHANGELOG.md", encoding="utf-8").read()
-    ),
+    long_description=read_file("README.md") + "\n\n" + read_file("CHANGELOG.md"),
     long_description_content_type='text/markdown',
     author='Vsevolod Krasovskyi',
     author_email='sevakrasovskiy@gmail.com',
