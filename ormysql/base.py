@@ -4,20 +4,13 @@ from .db import DB
 from .query import QueryMixin
 from .relations import ManyToManyManager, _AwaitableList
 
-def pluralize(word: str) -> str:
-    if word.endswith(("s", "x", "z", "ch", "sh")):
-        return word + "es"
-    if word.endswith("y") and word[-2] not in "aeiou":
-        return word[:-1] + "ies"
-    return word + "s"
-
 
 class ModelMeta(type):
     def __new__(cls, name, bases, attrs):
         fields = {k: v for k, v in attrs.items() if isinstance(v, Field)}
         meta = attrs.get('Meta', None)
         snake = cls.camel_to_snake(name)
-        table = getattr(meta, 'table', f"{snake}s")
+        table = getattr(meta, 'table', snake)
 
         for field_name, field in fields.items():
             field.model = None
