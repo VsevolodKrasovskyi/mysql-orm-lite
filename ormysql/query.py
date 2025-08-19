@@ -339,10 +339,16 @@ class QueryMixin:
     @classmethod
     def generate_create_table(cls):
         columns = []
+        indexes = [] 
         foreign_keys = []
+
         for name, field in cls.__fields__.items():
             if isinstance(field, ForeignKey):
                 columns.append(field.ddl(name))
+
+                # add an index on every FK column (perf for 1-N/M2M lookups)
+                indexes.append(f"INDEX ({cls.quote(name)})") 
+
                 fk = (
                     f"FOREIGN KEY ({cls.quote(name)}) REFERENCES "
                     f"{cls.quote(field.to_model.__table__)}({cls.quote(field.to_field)})"
@@ -351,19 +357,22 @@ class QueryMixin:
                     fk += f" ON DELETE {field.on_delete.upper()}"
                 if getattr(field, "on_update", None):
                     fk += f" ON UPDATE {field.on_update.upper()}"
-
                 foreign_keys.append(fk)
+
+                # dependency for topo-order
                 cls.__dependencies__ = getattr(cls, '__dependencies__', set())
                 cls.__dependencies__.add(field.to_model.__table__)
             else:
                 columns.append(field.ddl(name))
 
-        all_defs = columns + foreign_keys
+        # include indexes between columns and FKs
+        all_defs = columns + indexes + foreign_keys
         return (
             f"CREATE TABLE IF NOT EXISTS {cls.quote(cls.__table__)} (\n  "
             + ",\n  ".join(all_defs)
             + "\n);"
         )
+
 
 
     @classmethod

@@ -9,9 +9,10 @@ A tiny asynchronous ORM for MySQL built on top of `aiomysql`. It aims to stay mi
 * 🔌 **Connection pool** via `aiomysql.create_pool()`
 * 🧱 **Simple models** with fields and `ForeignKey`
 * 🗂️ **Auto table creation** (idempotent migrations)
-* 🧰 **CRUD**: `create`, `filter`, `get`, `update`, `delete`, `count`, `exists`
+* 🧰 **CRUD**: `create`, `filter`, `get`, `get_or_create`, `update`, `delete`, `count`, `exists`
 * 🔎 **Query helpers**: `order_by`, `limit`, `offset`, and extended filters `__gte`, `__lte`, `__like`, `__in`
 * 🔄 **Transactions & sessions** with `async with DB.transaction()/DB.session()`
+* 🔗 **Many-to-Many sugar** via `ManyToMany` in `Meta` (with manual through model)
 * ✅ **Safe**: parameterized SQL, whitelisted columns in `ORDER BY`
 * 📴 **Auto-close pool** on process exit (by default)
 
@@ -57,12 +58,13 @@ migrate.collect_models()
 
 # 3) Configure DB (pool is created lazily on first use)
 DB.connect(
-    host="localhost",
-    user="root",
-    password="root",
-    db="test",
-    autocommit=True,    # server-side autocommit
-    # autoclose=True    # auto-close pool at process exit (default = True)
+    host="127.0.0.1",   # required
+    user="root",        # required
+    password="root",    # required
+    db="test",          # required (created automatically if missing)
+    port=3306,           # optional (default: 3306)
+    autocommit=False,     # optional (default: True)
+    autoclose=True       # optional (default: True; auto-closes pool on exit)
 )
 
 async def main():
@@ -85,6 +87,61 @@ asyncio.run(main())
 
 ---
 
+## DB configuration & pool
+
+### `DB.connect(...)`
+
+Configure the connection pool **without opening it immediately**. The pool is created lazily on the first use. If the database does not exist, it will be created automatically.
+
+**Signature:**
+
+```python
+@classmethod
+def connect(cls, autoclose: bool = True, **kwargs):
+    """Configure the connection pool and autoclose behavior.
+
+    Required kwargs: host, user, password, db
+    Optional kwargs: port (default 3306), autocommit (default False), any aiomysql pool args
+    autoclose: if True (default), the pool will be closed automatically on process exit.
+    """
+```
+
+**Required parameters:**
+
+* `host` – MySQL host
+* `user` – DB user
+* `password` – DB password
+* `db` – database name (will be created if missing)
+
+**Optional parameters:**
+
+* `port` (default: `3306`)
+* `autocommit` (default: `False`) – server-side autocommit
+* `autoclose` (default: `True`) – auto-close pool on process exit
+* any other `aiomysql.create_pool` kwargs (e.g., `minsize`, `maxsize`, `charset`, etc.)
+
+### Sessions & transactions
+
+**Session**: reuse a single connection for multiple operations (no explicit transaction).
+
+```python
+async with DB.session() as conn:
+    rows = await User.filter(order_by="-id", limit=5, _conn=conn)
+    total = await User.count(_conn=conn)
+```
+
+**Transaction (ACID)**: guarantees `START TRANSACTION` → `COMMIT` / `ROLLBACK`.
+
+```python
+async with DB.transaction() as conn:
+    u = await User.create(name="X", email="x@x.com", _conn=conn)
+    await MetaUser.create(user_id=u.id, description="...", image="...", _conn=conn)
+```
+
+> Pass `_conn=conn` to each ORM call inside the context so all operations run on the same connection.
+
+---
+
 ## Defining models
 
 Models subclass `BaseModel` and declare fields. Supported field classes (in `fields.py`):
@@ -104,55 +161,72 @@ class User(BaseModel):
 
 ---
 
-## DB configuration & pool
+## Many-to-Many (M2M)
 
-Call `DB.connect(...)` once at startup. The pool is **lazy** (created on first use). If the database does not exist, it’s created automatically.
+Declare M2M on each side **inside `Meta`** using a manual *through* model. The attribute name you choose defines two generated accessors on that model:
 
-```python
-DB.connect(
-    host="localhost",
-    user="root",
-    password="root",
-    db="test",
-    autocommit=True,   # or False: ORM will commit after DML when it created the connection
-    autoclose=True     # default: True, auto-closes pool on process exit (atexit)
-)
-```
+* `<name>` – awaitable manager returning **target objects**
+* `<name>_rel` – awaitable list of **through rows** with the target attached (e.g., `rel.bonus`)
 
-### Sessions & transactions
-
-* **Session**: reuse a single connection for multiple operations (no explicit transaction).
+### Define models
 
 ```python
-async with DB.session() as conn:
-    rows = await User.filter(order_by="-id", limit=5, _conn=conn)
-    total = await User.count(_conn=conn)
+from ormysql.fields import ManyToMany
+
+class User(BaseModel):
+    id = Integer(pk=True)
+    username = String()
+
+    class Meta:
+        # creates: user.bonuses, user.bonuses_rel
+        bonuses = ManyToMany("Bonus", through="UserHasProduct")
+
+class Bonus(BaseModel):
+    id = Integer(pk=True)
+    name = String()
+    points = Integer()
+
+    class Meta:
+        # creates: bonus.users, bonus.users_rel
+        users = ManyToMany("User", through="UserHasProduct")
+
+class UserHasProduct(BaseModel):
+    id = Integer(pk=True)
+    # Non‑standard FK names are supported; detection uses ForeignKey.to_model
+    owner = ForeignKey(User,  nullable=False)
+    prize = ForeignKey(Bonus, nullable=False)
+    total_amount = Integer()
 ```
 
-* **Transaction (ACID)**: guarantees `START TRANSACTION` → `COMMIT` / `ROLLBACK`.
+### Read from the owner side
 
 ```python
-async with DB.transaction() as conn:
-    u = await User.create(name="X", email="x@x.com", _conn=conn)
-    await MetaUser.create(user_id=u.id, description="...", image="...", _conn=conn)
+u = await User.get(username="Vsevolod")
+
+for bonus in await u.bonuses:               # targets (Bonus[])
+    print(bonus.name, bonus.points)
+
+for rel in await u.bonuses_rel:             # through rows with attached target
+    print(rel.total_amount, rel.bonus.name) # rel.bonus is a Bonus
 ```
 
-All CRUD methods accept optional `_conn`, so you can batch operations in one session/transaction for speed and consistency.
-
----
-
-## Migrations (idempotent)
-
-A minimal migration helper that generates `CREATE TABLE IF NOT EXISTS` by introspecting your models.
+### Read from the target side (symmetric)
 
 ```python
-from ormysql import migrate
+b = await Bonus.get(name="Bonus A")
 
-migrate.collect_models()  # scan current module for BaseModel subclasses
-await migrate.run()       # apply DDL in dependency order
+for user in await b.users:                  # owners (User[])
+    print(user.username)
+
+for rel in await b.users_rel:               # through rows with attached owner
+    print(rel.total_amount, rel.user.username)
 ```
 
-> This is intentionally minimal: no schema versioning or ALTER flows. Perfect for small projects and experiments.
+**Notes**
+
+* No JOINs in user code; each access does at most **two batched queries** under the hood.
+* FK column names can be arbitrary (`owner`, `prize`, ...). The ORM matches by `ForeignKey.to_model`.
+* FK columns are indexed automatically in DDL for performance. Consider `UNIQUE (owner, prize)` on the through table to prevent duplicates.
 
 ---
 
@@ -162,7 +236,7 @@ await migrate.run()       # apply DDL in dependency order
 
 ```python
 user = await User.create(name="Alice", email="alice@example.com")
-# If autocommit=False, ORM commits automatically after DML when it created the connection.
+# If autocommit=False, the ORM will commit automatically after DML when it created the connection.
 ```
 
 ### Read: `all`, `filter`, `get`
@@ -202,6 +276,22 @@ maybe = await User.get(email="x@x.com", default=None)
 latest = await User.get(name="Alice", raise_multiple=False, order_by="-id")
 ```
 
+#### `get_or_create()` — idempotent fetch-or-insert
+
+```python
+obj, created = await User.get_or_create(
+    email="alice@example.com",
+    defaults={"name": "Alice"}
+)
+if created:
+    print("inserted")
+else:
+    print("fetched existing")
+```
+
+* Looks up by the non-default kwargs (`email` above). If not found, inserts with `kwargs + defaults`.
+* Returns a tuple `(obj, created: bool)`.
+
 ### Update
 
 ```python
@@ -229,7 +319,7 @@ exists = await User.exists(email="alice@example.com")
 
 ## Extended filters
 
-You can express basic operators right in kwargs:
+You can express basic operators directly in kwargs:
 
 * `field__gte=value`  → `field >= %s`
 * `field__lte=value`  → `field <= %s`
@@ -247,6 +337,22 @@ users = await User.filter(
     limit=20, offset=0
 )
 ```
+
+---
+
+## JOIN helper (read-only)
+
+Create a joined, read-only model combining fields from two models. Useful for reporting queries.
+
+```python
+Joined = User.join(UserHasProduct, on=[User.id, UserHasProduct.user_id], join_type="LEFT")
+rows = await Joined.filter(UserHasProduct__total_amount__gte=5).order_by("-User__id").all()
+for r in rows:
+    print(r.User__username, r.UserHasProduct__total_amount)
+```
+
+* Field access pattern: `<ModelName>__<field>` on both filters and result rows.
+* Use base models for write operations.
 
 ---
 
@@ -283,7 +389,9 @@ users = await User.filter(
 
 ---
 
-## Example: transaction with multiple models
+## Examples
+
+**Transaction spanning multiple models**
 
 ```python
 async with DB.transaction() as conn:
@@ -297,9 +405,7 @@ async with DB.transaction() as conn:
 # if any step fails → everything is rolled back
 ```
 
----
-
-## Example: batched reads in a single session
+**Batched reads in a single session**
 
 ```python
 async with DB.session() as conn:
@@ -308,18 +414,7 @@ async with DB.session() as conn:
     a_ids  = [u.id for u in await User.filter(name__like="A%", _conn=conn)]
 ```
 
----
 
-## Roadmap (nice-to-have)
-
-* Relation mapping helpers (`select_related`, lazy/eager)
-* Index definitions (including composite)
-* Model-level validation
-* SQL query logging
-* Simple CLI (apply/revert migrations, inspect schema)
-* Test utilities (temporary DB fixtures)
-
----
 
 ## FAQ
 

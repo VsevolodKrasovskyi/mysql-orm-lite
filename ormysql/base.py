@@ -1,7 +1,15 @@
-import re
-from .fields import Field
+import re, sys
+from .fields import Field, ManyToMany
 from .db import DB
 from .query import QueryMixin
+from .relations import ManyToManyManager, _AwaitableList
+
+def pluralize(word: str) -> str:
+    if word.endswith(("s", "x", "z", "ch", "sh")):
+        return word + "es"
+    if word.endswith("y") and word[-2] not in "aeiou":
+        return word[:-1] + "ies"
+    return word + "s"
 
 
 class ModelMeta(type):
@@ -24,12 +32,74 @@ class ModelMeta(type):
         new_cls.__fields__ = fields
         new_cls.__table__ = table
         new_cls.__joins__ = []
+        new_cls.__m2m_cache__ = {}
+
+        if meta:
+            m2m_map = {
+                attr_name: getattr(meta, attr_name)
+                for attr_name in dir(meta)
+                if not attr_name.startswith("_") and isinstance(getattr(meta, attr_name), ManyToMany)
+            }
+            for attr_name, m2m in m2m_map.items():
+                cls._install_m2m(new_cls, attr_name, m2m)
+
         return new_cls
 
     @staticmethod
     def camel_to_snake(name: str) -> str:
-        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-        return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+        name = re.sub(r'(?<!^)(?=[A-Z])', '_', name)
+        return name.lower()
+    
+    @classmethod
+    def _install_m2m(cls, owner_model, base_attr_name: str, m2m: ManyToMany):
+        module = sys.modules[owner_model.__module__]
+        target_ref = m2m.target_model   
+        through_ref = m2m.through      
+
+        if hasattr(owner_model, base_attr_name) or hasattr(owner_model, f"{base_attr_name}_rel"):
+            raise AttributeError(
+                f"Attribute name '{base_attr_name}' or '{base_attr_name}_rel' is reserved for ManyToMany on {owner_model.__name__}"
+            )
+
+        def _resolve_now():
+            cache_key = ("m2m", base_attr_name)
+            if not hasattr(owner_model, "__m2m_cache__"):
+                owner_model.__m2m_cache__ = {}
+            if cache_key in owner_model.__m2m_cache__:
+                return owner_model.__m2m_cache__[cache_key]
+
+            target_model = target_ref if isinstance(target_ref, type) else getattr(module, target_ref)
+            through_model = through_ref if isinstance(through_ref, type) else getattr(module, through_ref)
+
+            def find_fk(through, model):
+
+                for fname, fobj in through.__fields__.items():
+                    if getattr(fobj, "to_model", None) is model:
+                        return fname
+                guess = cls.camel_to_snake(model.__name__) + "_id"
+                if guess in through.__fields__:
+                    return guess
+                raise RuntimeError(f"FK not found in {through.__name__} for {model.__name__}")
+
+            self_fk   = find_fk(through_model, owner_model)
+            target_fk = find_fk(through_model, target_model)
+
+            target_attr = cls.camel_to_snake(target_model.__name__).split("_")[-1]
+
+            owner_model.__m2m_cache__[cache_key] = (target_model, through_model, self_fk, target_fk, target_attr)
+            return owner_model.__m2m_cache__[cache_key]
+
+        def _get_manager(self):
+            return ManyToManyManager(self, _resolve_now)
+        
+        def _get_rel(self):
+            async def _coro():
+                mgr = _get_manager(self)
+                return await mgr.through()
+            return _AwaitableList(_coro())
+
+        setattr(owner_model, base_attr_name, property(_get_manager))
+        setattr(owner_model, f"{base_attr_name}_rel", property(_get_rel))
 
 
 class BaseModel(QueryMixin, metaclass=ModelMeta):

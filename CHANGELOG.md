@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.3] - 2025-08-19
+### Added
+- Declarative ManyToMany in Meta with lazy resolution. The attribute name defines generated accessors: <name> (targets) and <name>_rel (through + attached target).
+- Symmetric M2M support by declaring a second ManyToMany on the other model (e.g., users = ManyToMany("User", through="UserHasProduct")).
+- Improved docstrings for DB.session() and DB.transaction() with clear usage examples.
+
+### Changed
+- DDL now adds indexes on all ForeignKey columns for faster M2O/M2M lookups.
+
+### Fixed
+- M2M FK detection now uses ForeignKey.to_model (instead of a non-existent ref), enabling non-standard FK names in through models.
+- ManyToManyManager.all() de-duplicates target IDs (order-preserving) to avoid repeated results when through rows are duplicated.
+- Lazy model resolution in M2M prevents early AttributeError when classes are declared in any order.
+
 ## [0.1.2] - 2025-08-15
 ### Added
 - Support for `on_delete` / `on_update` arguments in `ForeignKey` with automatic inclusion in generated DDL (`ON DELETE` / `ON UPDATE` clauses).

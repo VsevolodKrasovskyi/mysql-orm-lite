@@ -12,12 +12,12 @@ class Field:
 
     Usage:
         id = Field("INT", pk=True)
-        name = Field("VARCHAR(100)", unique=True, nullable=False)
+        name = Field("VARCHAR(100)", unique=True, nullable=True)
 
     Usually, you don't use Field directly — instead, you use subclasses like Integer, String, etc.
     """
 
-    def __init__(self, sql_type, pk=False, unique=False, nullable=False, default=None):
+    def __init__(self, sql_type, pk=False, unique=False, nullable=True, default=None):
         self.sql_type = sql_type
         self.primary_key = pk
         self.unique = unique
@@ -191,3 +191,31 @@ class Decimal(Field):
     """
     def __init__(self, precision=10, scale=2, **kwargs):
         super().__init__(f"DECIMAL({precision},{scale})", **kwargs)
+
+class ManyToMany:
+    """
+    Declarative marker for a Many-to-Many relation, used **only** inside a model's Meta.
+
+    Usage:
+        class User(BaseModel):
+            class Meta:
+                bonuses = ManyToMany("Bonus", through="UserHasProduct")
+
+    What it does:
+      - The attribute name on Meta (e.g. `bonuses`) defines two reserved properties on the owner model:
+            owner.bonuses       -> awaitable manager returning target objects (e.g. Bonus[])
+            owner.bonuses_rel   -> awaitable list of through rows with attached target (rel.bonus)
+      - Resolution is lazy: target/through models and FK column names are resolved on first access.
+      - No joins are required in user code; the ORM performs batched IN-queries under the hood.
+
+    Notes:
+      - `through` must be an explicit model with two ForeignKey fields pointing to owner and target.
+      - To get the reverse side, declare a symmetric ManyToMany on the other model (e.g. `users = ManyToMany("User", through="UserHasProduct")`).
+      - The generated property names (e.g. `bonuses`, `bonuses_rel`) are reserved and cannot be redefined on the model.
+    """
+    def __init__(self, target_model, through):
+        self.target_model = target_model   # class or string
+        self.through = through             # class or string
+
+    def __repr__(self):
+        return f"<ManyToMany target={self.target_model} through={self.through}>"
