@@ -6,7 +6,7 @@ export default defineConfig({
   outDir: fileURLToPath(new URL ('../../docs', import.meta.url)),
   title: 'ormysql',
   description: 'Async ORM for MariaDB/MySQL',
-  base: '/',
+  base: '/mysql-orm-lite/',
   lang: 'ru-RU',
   lastUpdated: true,
   cleanUrls: true,
