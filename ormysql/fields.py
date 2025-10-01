@@ -83,7 +83,8 @@ class ForeignKey(Field):
         - DDL will be generated, and the BaseModel.generate_create_table method
           will add the FOREIGN KEY constraint automatically.
     """
-    def __init__(self, *args, to=None, to_field="id", on_delete=None, on_update=None, **kwargs):
+    def __init__(self, *args, to=None, to_field="id",
+                 on_delete=None, on_update=None, sql_type=None, **kwargs):
         if args:
             to = args[0]
             if len(args) > 1:
@@ -91,22 +92,21 @@ class ForeignKey(Field):
         if to is None:
             raise ValueError("ForeignKey: 'to' model must be specified.")
 
-        super().__init__("INT", **kwargs)
+        if sql_type is None:
+            try:
+                ref_field = to.__fields__[to_field]
+                sql_type = ref_field.sql_type
+            except Exception:
+                sql_type = "INT"  # fallback
+
+        super().__init__(sql_type, **kwargs)
         self.to_model = to
         self.to_field = to_field
         self.on_delete = on_delete
         self.on_update = on_update
 
     def ddl(self, name):
-        """
-        Generate the SQL for the foreign key column itself.
-        (The actual FOREIGN KEY constraint is added separately in generate_create_table.)
-
-        Example:
-            ForeignKey(User).ddl("user_id") -> "`user_id` INT NOT NULL"
-        """
         return Field.ddl(self, name)
-
 
 class Integer(Field):
     """
@@ -167,6 +167,17 @@ class DateTime(Field):
         super().__init__("DATETIME", **kwargs)
 
 
+class Date(Field):
+    """
+    Shortcut for a DATE column.
+
+    Example:
+        created_at = Date(default="CURRENT_TIMESTAMP")
+    """
+    def __init__(self, **kwargs):
+        super().__init__("DATE", **kwargs)
+
+
 class Float(Field):
     """
     Shortcut for a FLOAT column.
@@ -191,6 +202,39 @@ class Decimal(Field):
     """
     def __init__(self, precision=10, scale=2, **kwargs):
         super().__init__(f"DECIMAL({precision},{scale})", **kwargs)
+
+class Set(Field):
+    
+    def __init__(self, values, **kwargs):
+        vals = list(values or [])
+        if not vals:
+            raise ValueError("Set requires at least one value")
+        sql = "SET(" + ",".join("'" + v.replace("'", "''") + "'" for v in vals) + ")"
+        super().__init__(sql, **kwargs)
+
+class Enum(Field):
+    """
+    Shortcut for ENUM column.
+
+    Args:
+        values (list[str]): list of allowed values
+        kwargs: passed to Field (nullable, default, unique, etc.)
+
+    Example:
+        status = Enum(values=["draft", "published", "archived"], default="draft")
+    """
+    def __init__(self, values, **kwargs):
+        vals = list(values or [])
+        if not vals:
+            raise ValueError("Enum requires at least one value")
+        sql = "ENUM(" + ",".join("'" + v.replace("'", "''") + "'" for v in vals) + ")"
+        super().__init__(sql, **kwargs)
+        self.values = vals
+
+
+class JSON(Field):
+    def __init__(self, **kwargs):
+        super().__init__("JSON", **kwargs)
 
 class ManyToMany:
     """

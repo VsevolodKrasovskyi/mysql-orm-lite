@@ -9,7 +9,7 @@ def read_file(filename):
 
 setup(
     name='ormysql',
-    version='0.1.3',
+    version='0.1.5',
     description='MySQL ORM',
     long_description=read_file("README.md") + "\n\n" + read_file("CHANGELOG.md"),
     long_description_content_type='text/markdown',

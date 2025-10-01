@@ -7,6 +7,7 @@ class DB:
     _config = None
     _pool = None
     _auto_close_enabled = False
+    
 
     @classmethod
     def connect(cls, autoclose: bool = True, **kwargs):
@@ -25,7 +26,7 @@ class DB:
 
         ### Optional kwargs:
         - port (int)             : Default 3306
-        - autocommit (bool)      : Default False (server-side autocommit)
+        - autocommit (bool)      : Default True (server-side autocommit)
         - Any `aiomysql.create_pool(...)` options, e.g.:
             minsize, maxsize, pool_recycle, connect_timeout, charset, autoping, etc.
         Parameter (not in **kwargs):
@@ -55,6 +56,7 @@ class DB:
         cls._config = dict(kwargs)
         cls._config['autocommit'] = kwargs.get('autocommit', True)
         cls._config['autoclose'] = autoclose
+
         if autoclose:
             cls._enable_auto_close()
 
@@ -87,9 +89,11 @@ class DB:
 
         cfg = dict(cls._config)
         cfg.pop("autoclose", None)
+        minsize = cfg.pop("minsize", 1)
+        maxsize = cfg.pop("maxsize", 10)
 
         try:
-            cls._pool = await aiomysql.create_pool(**cfg, minsize=1, maxsize=10)
+            cls._pool = await aiomysql.create_pool(**cfg, minsize=minsize, maxsize=maxsize)
         except Exception as e:
             if 'Unknown database' in str(e):
                 db_name = cls._config.get("db")
@@ -106,7 +110,7 @@ class DB:
                 tmp_pool.close()
                 await tmp_pool.wait_closed()
 
-                cls._pool = await aiomysql.create_pool(**cfg, minsize=1, maxsize=10)
+                cls._pool = await aiomysql.create_pool(**cfg, minsize=minsize, maxsize=maxsize)
             else:
                 raise ConnectionError(f"Failed to create pool: {e}")
 
@@ -163,6 +167,12 @@ class DB:
         conn = await cls.conn()
         try:
             yield conn
+            if not cls.is_autocommit():
+                await conn.commit()
+        except Exception:
+            if not cls.is_autocommit():
+                await conn.rollback()
+            raise
         finally:
             await cls.release(conn)
 

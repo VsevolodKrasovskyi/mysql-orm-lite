@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.4] - date
+
+### Added
+- Field Enum, Set
+
+### Changed
+
+### Fixed
+- mysql pool
+
+
 ## [0.1.3] - 2025-08-19
 ### Added
 - Declarative ManyToMany in Meta with lazy resolution. The attribute name defines generated accessors: <name> (targets) and <name>_rel (through + attached target).

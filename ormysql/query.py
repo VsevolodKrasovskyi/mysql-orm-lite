@@ -34,7 +34,7 @@ class QueryMixin:
     
 
     @classmethod
-    async def create(cls, _conn=None, **kwargs):
+    async def create(cls, _conn=None, defaults=None, **kwargs):
         """
         Create a new record in the database.
 
@@ -50,12 +50,18 @@ class QueryMixin:
             user = await User.create(name="John", email="john@example.com")
             ```
         """
+        if defaults:
+            for k, v in defaults.items():
+                kwargs.setdefault(k, v)
+
         kwargs.pop("_db", None)
+
         keys = list(kwargs.keys())
         values = tuple(kwargs[k] for k in keys)
         fields = ", ".join(cls.quote(k) for k in keys)
         placeholders = ", ".join(["%s"] * len(keys))
         sql = f"INSERT INTO {cls.quote(cls.__table__)} ({fields}) VALUES ({placeholders})"
+
         created_locally = _conn is None
         conn = _conn or await cls.connect()
         try:
@@ -68,6 +74,7 @@ class QueryMixin:
         finally:
             if created_locally:
                 await DB.release(conn)
+
         obj = cls(**kwargs)
         if "id" in cls.__fields__:
             setattr(obj, "id", last_id)
@@ -160,7 +167,7 @@ class QueryMixin:
         return [cls(**cls._map_row(row)) for row in rows]
 
     @classmethod
-    async def get(cls, *, default=_SENTINEL, raise_multiple=True, order_by=None, _conn=None, **kwargs):
+    async def get(cls, *, default=None, raise_multiple=False, order_by=None, _conn=None, **kwargs):
         """
         Retrieve a single record.
 
@@ -179,25 +186,66 @@ class QueryMixin:
             user = await User.get(id=1)
             ```
         """
-        if raise_multiple:
-            rows = await cls.filter(limit=2, _conn=_conn, **kwargs)
-            if not rows:
-                if default is _SENTINEL:
-                    raise LookupError(f"{cls.__name__}.get() no rows for {kwargs}")
-                return default
-            if len(rows) > 1:
-                raise LookupError(f"{cls.__name__}.get() multiple rows for {kwargs}")
-            return rows[0]
-        else:
-            rows = await cls.filter(limit=1, order_by=order_by, _conn=_conn, **kwargs)
-            if not rows:
-                if default is _SENTINEL:
-                    raise LookupError(f"{cls.__name__}.get() no rows for {kwargs}")
-                return default
-            return rows[0]
+        rows = await cls.filter(limit=1, order_by=order_by, _conn=_conn, **kwargs)
+        return rows[0] if rows else default
+    
+    # Удалить
+    @classmethod
+    async def get_or_none(cls, _conn=None, **kwargs):
+        """
+        Retrieve a single record or return None if not found.
+
+        Args:
+            _conn: Optional DB connection.
+            **kwargs: Filter conditions.
+
+        Returns:
+            Model instance or None.
+
+        Behavior:
+            - If exactly one row matches, returns it.
+            - If no rows match, returns None.
+            - If more than one row matches, raises LookupError to prevent ambiguous fetches.
+
+        Example:
+            ```python
+            user = await User.get_or_none(email="john@example.com")
+            if user is None:
+                # handle not found
+                ...
+            ```
+        """
+        return await cls.get(default=None, raise_multiple=True, _conn=_conn, **kwargs)
+    # удалить
+    @classmethod
+    async def first_or_none(cls, order_by=None, _conn=None, **kwargs):
+        """
+        Return the first matching record or None.
+
+        Args:
+            order_by (str, optional): Column name to order by; prefix with '-' for DESC.
+            _conn: Optional DB connection.
+            **kwargs: Filter conditions.
+
+        Returns:
+            Model instance or None.
+
+        Notes:
+            Unlike `get_or_none`, this method never raises due to multiple matches;
+            it simply returns the first row according to the given ordering (if any).
+
+        Example:
+            ```python
+            latest_error = await Log.first_or_none(order_by="-created_at", level="error")
+            if latest_error:
+                ...
+            ```
+        """
+        rows = await cls.filter(limit=1, order_by=order_by, _conn=_conn, **kwargs)
+        return rows[0] if rows else None
 
     @classmethod
-    async def get_or_create(cls, _conn=None, **kwargs):
+    async def get_or_create(cls, _conn=None, defaults=None, **lookup):
         """
         Retrieve a record or create it if not exists.
 
@@ -213,10 +261,17 @@ class QueryMixin:
             user, created = await User.get_or_create(email="john@example.com", name="John")
             ```
         """
-        found = await cls.filter(_conn=_conn, **kwargs)
+        
+        found = await cls.filter(_conn=_conn, **lookup)
         if found:
             return found[0], False
-        created = await cls.create(_conn=_conn, **kwargs)
+
+        data = {}
+        if defaults:
+            data.update(defaults)
+        data.update(lookup)
+
+        created = await cls.create(_conn=_conn, **data)
         return created, True
 
     @classmethod
